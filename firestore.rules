@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function verifiedSorsuEmail() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('(?i)^[^@]+@sorsu[.]edu[.]ph$');
+    }
+
+    function isTeacher() {
+      return hasProfile()
+        && profile().role == "teacher"
+        && profile().status == "active"
+        && profile().email == request.auth.token.email
+        && verifiedSorsuEmail();
+    }
+
+    function ownsStudent(studentId) {
+      return hasProfile()
+        && profile().role == "student"
+        && profile().studentId == studentId;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && (
+          (
+            request.resource.data.keys().hasOnly(["uid", "fullName", "email", "role", "studentId", "createdAt"])
+            && request.resource.data.keys().hasAll(["uid", "fullName", "email", "role", "studentId"])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.role == "student"
+            && request.resource.data.fullName is string
+            && request.resource.data.email is string
+            && request.resource.data.studentId is string
+            && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId))
+            && get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.email == request.resource.data.email
+          )
+          ||
+          (
+            request.resource.data.keys().hasOnly(["uid", "fullName", "teacherId", "email", "role", "status", "createdAt"])
+            && request.resource.data.keys().hasAll(["uid", "fullName", "teacherId", "email", "role", "status"])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.role == "teacher"
+            && request.resource.data.status == "pendingEmailVerification"
+            && request.resource.data.fullName is string
+            && request.resource.data.teacherId is string
+            && request.resource.data.teacherId.size() > 0
+            && request.resource.data.email is string
+            && request.resource.data.email == request.auth.token.email
+            && request.resource.data.email.matches('(?i)^[^@]+@sorsu[.]edu[.]ph$')
+          )
+        );
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && verifiedSorsuEmail()
+        && resource.data.email == request.auth.token.email
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "status"])
+        && request.resource.data.role == "teacher"
+        && request.resource.data.status == "active"
+        && (
+          resource.data.role == "pendingTeacher"
+          || (
+            resource.data.role == "teacher"
+            && (
+              !("status" in resource.data)
+              || resource.data.status == "pendingEmailVerification"
+            )
+          )
+          || (
+            resource.data.role == "teacher"
+            && resource.data.status == "active"
+            && request.resource.data.status == "active"
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /students/{studentDocumentId} {
+      allow read: if isTeacher() || ownsStudent(studentDocumentId);
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /classes/{classId} {
+      allow read: if isTeacher();
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isTeacher()
+        || (hasProfile()
+          && profile().role == "student"
+          && resource.data.studentId == profile().studentId);
+      allow create, update, delete: if isTeacher();
+    }
+  }
+}
