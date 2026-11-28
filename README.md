@@ -153,7 +153,7 @@ Keep `.env` and Firebase service-account keys out of Git. Use focused branches a
 
 ## Group members
 
-- Member 1: ____________________
-- Member 2: ____________________
-- Member 3: ____________________
-- Member 4: ____________________
+- Member 1: Gordola, Rosefe G.
+- Member 2: Espena, Anabelle M.
+- Member 3: Gilleg, Creistel Joy 
+
